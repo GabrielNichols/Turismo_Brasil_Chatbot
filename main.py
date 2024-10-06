@@ -4,8 +4,22 @@ import json
 from flask import Flask, render_template_string
 import threading
 import time
+from bs4 import BeautifulSoup
+from elasticsearch import Elasticsearch
+from vllm import LLM, SamplingParams
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.prebuilt import create_react_agent
+import logging
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
+import random
+
+# Configuração do logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Inicializar Elasticsearch
+es = Elasticsearch("http://localhost:9200")
 
 # Inicializar o Flask
 app = Flask(__name__)
@@ -13,12 +27,19 @@ app = Flask(__name__)
 # Variável global para armazenar o HTML do mapa
 map_html_content = ""
 
-# Carregar o modelo de linguagem da Hugging Face
-model_name = "distilgpt2"  # Modelo leve para demonstração, pode ser substituído por outro mais apropriado
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
-
 # Funções auxiliares
+
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1'
+]
+
+def get_random_user_agent():
+    return random.choice(USER_AGENTS)
+
 def geocode_location(location_name):
     url = 'https://nominatim.openstreetmap.org/search'
     params = {
@@ -38,6 +59,7 @@ def geocode_location(location_name):
     else:
         return None, None, None
 
+
 def create_leaflet_map_html(latitude, longitude, location_name="Brasil", geojson=None):
     # Criar um HTML que usa Leaflet.js para exibir o mapa
     geojson_layer = ""
@@ -46,7 +68,7 @@ def create_leaflet_map_html(latitude, longitude, location_name="Brasil", geojson
             var geojson = {json.dumps(geojson)};
             var geoLayer = L.geoJSON(geojson, {{
                 style: function (feature) {{
-                    return {{color: "#0000FF", weight: 2, fillOpacity: 0.2}};
+                    return {{color: \"#0000FF\", weight: 2, fillOpacity: 0.2}};
                 }}
             }}).addTo(map);
             map.fitBounds(geoLayer.getBounds());
@@ -84,6 +106,7 @@ def create_leaflet_map_html(latitude, longitude, location_name="Brasil", geojson
     """
     return map_html
 
+
 @app.route("/map")
 def serve_map():
     return render_template_string(map_html_content)
@@ -105,12 +128,116 @@ def process_location(location_name):
     
     return iframe_html, f"Principais atrações turísticas de {location_name} no Brasil."
 
-# Função para gerar a resposta do chatbot usando o modelo de linguagem
-def chatbot_response(user_input):
-    input_ids = tokenizer.encode(user_input, return_tensors='pt')
-    output = model.generate(input_ids, max_length=150, temperature=0.7, do_sample=True)
-    response = tokenizer.decode(output[0], skip_special_tokens=True)
-    return response
+# Função para recuperar contexto do Elasticsearch
+def get_context(localizacao):
+    logger.debug(f"Buscando contexto no Elasticsearch para a localização: {localizacao}")
+    try:
+        resultados_pesquisa = es.search(index="dados_turismo", query={"match": {"localizacao": localizacao}})
+        if resultados_pesquisa['hits']['total']['value'] > 0:
+            logger.debug(f"Contexto encontrado para a localização: {localizacao}")
+            return ' '.join(hit["_source"]["conteudo"] for hit in resultados_pesquisa['hits']['hits'])
+        else:
+            logger.debug(f"Nenhum contexto encontrado para a localização: {localizacao}")
+    except Exception as e:
+        logger.error(f"Erro ao buscar contexto para a localização: {localizacao}. Erro: {e}")
+    return ""
+
+# Função do chatbot que utiliza vLLM ou Transformers para responder
+def responder_chatbot(pergunta, localizacao):
+    logger.debug(f"Gerando resposta para a pergunta: '{pergunta}' e localização: '{localizacao}'")
+    contexto = get_context(localizacao)
+    if not contexto:
+        logger.warning("Contexto insuficiente para gerar resposta.")
+        return "Desculpe, não consegui encontrar informações suficientes sobre esse local."
+
+    # Tentativa de usar vLLM para gerar resposta com base no contexto recuperado
+    try:
+        model_name = "mistralai/Pixtral-12B-2409"
+        sampling_params = SamplingParams(max_tokens=150, temperature=0.7)
+        llm = LLM(model=model_name, tokenizer_mode="mistral", limit_mm_per_prompt={"image": 5}, max_model_len=32768)
+        prompt = f"Você é um especialista em turismo. Responda a pergunta do usuário com base no contexto abaixo.\n\nContexto: {contexto}\n\nPergunta: {pergunta}\nResposta:"
+        resposta = llm.chat(messages=[{"role": "user", "content": prompt}], sampling_params=sampling_params)[0].outputs[0].text
+        logger.debug("Resposta gerada com sucesso usando vLLM.")
+        return resposta
+    except Exception as e:
+        logger.error(f"Erro ao gerar resposta com vLLM. Erro: {e}")
+        logger.info("Tentando usar modelo Transformers como fallback.")
+    
+    # Fallback para usar o modelo Transformers se vLLM falhar
+    try:
+        model_name = "pixtral-12b-2409"  # Usar o mesmo modelo
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+        prompt = f"Você é um especialista em turismo. Responda a pergunta do usuário com base no contexto abaixo.\n\nContexto: {contexto}\n\nPergunta: {pergunta}\nResposta:"
+        input_ids = tokenizer.encode(prompt, return_tensors='pt')
+        output = model.generate(input_ids, max_length=150, temperature=0.7, do_sample=True)
+        resposta = tokenizer.decode(output[0], skip_special_tokens=True)
+        logger.debug("Resposta gerada com sucesso usando Transformers.")
+        return resposta
+    except Exception as e:
+        logger.error(f"Erro ao gerar resposta com o modelo Transformers. Erro: {e}")
+        return "Erro ao gerar resposta. Por favor, tente novamente mais tarde."
+
+# Função para criar agentes usando LangGraph e realizar buscas paralelas
+def criar_agentes_busca(localizacao, num_agentes=3):
+    logger.debug(f"Criando {num_agentes} agentes para realizar buscas no SearXNG para a localização: '{localizacao}'")
+    memory = MemorySaver()
+    # Aqui substituímos o modelo vLLM pelo Transformers se necessário
+    try:
+        model = LLM(model="mistralai/Pixtral-12B-2409", tokenizer_mode="mistral", limit_mm_per_prompt={"image": 5}, max_model_len=32768)
+    except Exception as e:
+        logger.error(f"Erro ao inicializar vLLM. Usando Transformers como fallback. Erro: {e}")
+        model_name = "pixtral-12b-2409"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+    # Aqui substituímos o TavilySearchResults por uma função de busca personalizada
+    agentes = []
+    for _ in range(num_agentes):
+        agente = create_react_agent(model, [buscar_searx], checkpointer=memory)
+        agentes.append(agente)
+    return agentes
+
+# Função para realizar busca no SearXNG
+def buscar_searx(query):
+    logger.debug(f"Iniciando busca no SearXNG para a query: '{query}'")
+    url_instancia = 'https://searx.org/search'
+    params = {
+        'q': query,
+        'format': 'json',
+        'categories': 'general',
+        'safesearch': 1
+    }
+    headers = {
+        'User-Agent': get_random_user_agent()
+    }
+    resposta = requests.get(url_instancia, params=params, headers=headers)
+    if resposta.status_code == 200:
+        logger.debug("Busca realizada com sucesso.")
+    else:
+        logger.error(f"Erro na busca SearXNG. Status code: {resposta.status_code}")
+    resultados = resposta.json().get('results', []) if resposta.status_code == 200 else []
+    conteudos_extraidos = []
+    for resultado in resultados:
+        url = resultado.get('url')
+        if url:
+            conteudo = extrair_conteudo(url)
+            if conteudo:
+                conteudos_extraidos.append(conteudo)
+    return conteudos_extraidos
+
+# Função para realizar scraping dos resultados com BeautifulSoup
+def extrair_conteudo(url):
+    logger.debug(f"Iniciando extração de conteúdo da URL: {url}")
+    try:
+        resposta = requests.get(url, headers={'User-Agent': get_random_user_agent()}, timeout=10)
+        soup = BeautifulSoup(resposta.content, 'html.parser')
+        paragrafos = soup.find_all('p')
+        conteudo = ' '.join(p.text for p in paragrafos)
+        logger.debug(f"Conteúdo extraído com sucesso da URL: {url}")
+        return conteudo
+    except Exception as e:
+        logger.error(f"Erro ao extrair conteúdo da URL: {url}. Erro: {e}")
+        return ""
 
 # Construção da interface
 with gr.Blocks() as demo:
@@ -149,16 +276,11 @@ with gr.Blocks() as demo:
 
     # Conectar a função do chatbot ao botão de perguntar
     ask_button.click(
-        fn=chatbot_response,
-        inputs=user_question,
+        fn=responder_chatbot,
+        inputs=[user_question, location_input],
         outputs=response_output
     )
 
 # Função para iniciar o servidor Flask em uma thread separada
 def start_flask_app():
-    app.run(port=5000)
-
-if __name__ == "__main__":
-    flask_thread = threading.Thread(target=start_flask_app)
-    flask_thread.start()
-    demo.launch()
+    app.run
