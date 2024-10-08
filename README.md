@@ -14,6 +14,8 @@ O objetivo deste projeto é desenvolver um chatbot capaz de interagir com os usu
 - **Mapas Interativos**: Integração com o Leaflet.js para exibir mapas interativos dos locais pesquisados.
 - **Geração de Descrições Turísticas**: Utiliza modelos de linguagem natural para gerar descrições concisas e informativas sobre os locais.
 - **Busca e Processamento de Conteúdo**: Extrai informações relevantes da internet para enriquecer as respostas.
+- **Personalização das Respostas**: Respostas são personalizadas com base nas perguntas dos usuários, abrangendo diferentes tópicos como destinos, gastronomia e cultura.
+- **Guardrails nos Prompts**: Implementação de diretrizes nos prompts para garantir respostas precisas, coerentes e alinhadas com o contexto fornecido.
 
 ### Tecnologias Utilizadas
 
@@ -25,8 +27,23 @@ O objetivo deste projeto é desenvolver um chatbot capaz de interagir com os usu
 - **Hugging Face Hub**: Plataforma para modelos de inteligência artificial.
 - **BeautifulSoup e Readability**: Para extração e processamento de conteúdo web.
 - **Leaflet.js**: Biblioteca JavaScript para mapas interativos.
-- **Docker**: Para containerização da aplicação (opcional).
+- **FAISS**: Biblioteca para busca vetorial eficiente.
 - **Variáveis de Ambiente (.env)**: Gerenciamento seguro de tokens e credenciais.
+
+---
+
+## 🗂️ Estrutura do Projeto
+
+O projeto está modularizado para facilitar a manutenção e escalabilidade. A seguir, uma visão geral dos principais arquivos e diretórios:
+
+- **app.py**: Arquivo principal que coordena a aplicação, integrando os módulos e lançando a interface Gradio.
+- **chatbot.py**: Responsável pela criação da cadeia de conversação e geração de respostas utilizando o LLM.
+- **data_processing.py**: Lida com a busca, processamento e ingestão de dados no banco vetorial.
+- **config.py**: Configurações globais, incluindo inicialização do LLM, embeddings e memória.
+- **utils.py**: Funções auxiliares para geocodificação, criação de mapas e seleção de user agents.
+- **requirements.txt**: Lista de dependências do projeto.
+- **.env**: Arquivo de variáveis de ambiente para gerenciamento seguro de tokens e credenciais.
+- **LICENSE**: Arquivo de licença do projeto.
 
 ---
 
@@ -101,7 +118,7 @@ O objetivo deste projeto é desenvolver um chatbot capaz de interagir com os usu
    Com o ambiente virtual ativado e no diretório do projeto, execute:
 
    ```bash
-   python main.py
+   python app.py
    ```
 
 2. **Acesse a Interface Web**
@@ -139,20 +156,20 @@ O objetivo deste projeto é desenvolver um chatbot capaz de interagir com os usu
 - **Configuração de Parâmetros**: Configurei parâmetros como temperatura, top_p e max_tokens para controlar o comportamento do modelo.
 - **Encadeamento com Prompts Personalizados**: Usei `PromptTemplate` para criar prompts que orientam o modelo a gerar respostas relevantes e coerentes.
 
-### Ajustes Finos (Temperatura, Max Tokens, etc.)
+### Ajustes Finos (Temperatura, Top_p, Max Tokens, etc.)
 
 - **Temperatura**:
-
+  
   - **Descrição**: Controla a aleatoriedade das respostas. Valores mais baixos resultam em respostas mais previsíveis.
   - **Aplicação**: Utilizei valores entre 0.3 e 0.7 para equilibrar a criatividade e a coerência das respostas.
 
 - **Top_p**:
-
+  
   - **Descrição**: Nucleus sampling; considera a probabilidade cumulativa dos tokens.
   - **Aplicação**: Defini valores como 0.9 para garantir que as respostas sejam relevantes sem sacrificar a diversidade.
 
 - **Max_tokens**:
-
+  
   - **Descrição**: Limita o número máximo de tokens na resposta gerada.
   - **Aplicação**: Estabeleci limites para evitar respostas muito longas e garantir tempos de resposta razoáveis.
 
@@ -162,20 +179,52 @@ O objetivo deste projeto é desenvolver um chatbot capaz de interagir com os usu
 - **Limitação de Comprimento**: max_tokens garante que as respostas sejam concisas, melhorando a experiência do usuário.
 - **Personalização**: Permite afinar o modelo para atender às necessidades específicas da aplicação, como estilo de linguagem e nível de detalhe.
 
-### Limitações Atuais e Melhorias Futuras
+### Melhoria dos Prompts e Implementação de Guardrails
 
-**Limitações**:
+Para garantir que o chatbot possa personalizar as respostas de forma eficaz e lidar com diferentes tipos de perguntas sobre destinos, gastronomia e cultura, os prompts foram aprimorados com diretrizes claras e específicas.
 
-- **Compreensão Limitada do Contexto Cultural Específico**: O modelo pode não capturar nuances culturais ou informações atualizadas sobre todos os destinos.
-- **Dependência de Dados da Internet**: A extração de conteúdo da web pode trazer informações desatualizadas ou irrelevantes.
-- **Capacidade Computacional**: Modelos grandes podem exigir recursos significativos, afetando a escalabilidade.
+#### a. **Prompt de Conversação Aprimorado:**
 
-**Melhorias Futuras**:
+- **Especialização**: O prompt agora especifica que o assistente é um especialista em turismo brasileiro com conhecimento sobre destinos, gastronomia e cultura.
+- **Instruções Claras**: As instruções no prompt orientam o modelo a responder de forma detalhada, precisa e envolvente.
+- **Foco**: Garante que as respostas estejam alinhadas com o contexto fornecido.
 
-- **Treinamento Personalizado**: Treinar o modelo com um conjunto de dados específico sobre turismo brasileiro para melhorar a precisão.
-- **Atualização de Dados**: Implementar mecanismos para garantir que as informações estejam sempre atualizadas.
-- **Integração com APIs Oficiais**: Utilizar dados oficiais de turismo para enriquecer as respostas.
-- **Otimização de Performance**: Explorar técnicas de compressão ou modelos mais leves para melhorar a eficiência.
+#### b. **Prompt de Descrição Turística Aprimorado com Guardrails:**
+
+- **Especialização**: Especifica que o assistente possui amplo conhecimento sobre destinos, gastronomia e cultura.
+- **Instruções Detalhadas**:
+  - **Linguagem**: Respostas em português.
+  - **Conteúdo**: Destacar atrações turísticas, pontos de interesse, aspectos culturais e opções gastronômicas.
+  - **Clareza e Objetividade**: Evitar jargões e manter a descrição concisa.
+  - **Limite de Texto**: Controla o comprimento da resposta para garantir que seja curta e objetiva.
+
+#### c. **Tratamento de Exceções Melhorado:**
+
+- **Robustez**: Adiciona blocos `try-except` para capturar e logar erros durante a invocação da cadeia, garantindo que a aplicação não falhe inesperadamente.
+- **Feedback ao Usuário**: Fornece mensagens de erro amigáveis ao usuário em caso de falhas.
+
+#### d. **Logs Mais Detalhados:**
+
+- **Depuração**: Adiciona logs detalhados para monitorar a geração de respostas e identificar rapidamente problemas.
+
+### Fluxo de Trabalho Atualizado
+
+1. **Usuário Solicita Informações:**
+   - Entra com uma localização (e.g., "São Paulo") e clica em "Buscar".
+
+2. **Processamento da Localização:**
+   - **Geocodificação:** Obtém as coordenadas e GeoJSON da localização.
+   - **Mapeamento:** Atualiza o mapa exibido na interface.
+   - **Extração de Contexto:** Busca e processa documentos relacionados à localização.
+   - **Ingestão no VectorStore:** Armazena os documentos processados no FAISS.
+
+3. **Configuração da Cadeia de Conversação:**
+   - **Criação da Cadeia:** Inicializa a cadeia de conversação com o retriever atualizado.
+   - **Geração da Descrição Turística:** Utiliza o contexto para gerar uma descrição concisa e direta.
+
+4. **Interação com o Chatbot:**
+   - **Recebimento de Perguntas:** Usuário faz perguntas sobre a região.
+   - **Geração de Respostas:** O chatbot responde com base no contexto fornecido e nas instruções dos prompts.
 
 ---
 
