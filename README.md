@@ -61,7 +61,7 @@ O projeto está modularizado para facilitar a manutenção e escalabilidade. A s
 1. **Clone o Repositório**
 
    ```bash
-   git clone https://github.com/GabrielNichols/projeto_turismo
+   git clone https://github.com/GabrielNichols/Turismo_Brasil_Chatbot
    cd turismo-brasil-chatbot
    ```
 
