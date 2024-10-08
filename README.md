@@ -8,6 +8,12 @@ Bem-vindo ao **Turismo Brasil Chatbot**, uma aplicação interativa que fornece 
 
 O objetivo deste projeto é desenvolver um chatbot capaz de interagir com os usuários e fornecer dicas personalizadas de viagens sobre diferentes regiões do Brasil. A aplicação visa auxiliar turistas e entusiastas a descobrir destinos, compreender aspectos culturais e conhecer a gastronomia brasileira, tudo através de uma interface web intuitiva.
 
+### 📺 Demonstração
+
+Aqui está uma demonstração de como o **Turismo Brasil Chatbot** funciona:
+
+![Demonstração do Turismo Brasil Chatbot](assets/demo.gif)
+
 ### Funcionalidades
 
 - **Interação Conversacional**: O chatbot responde a perguntas dos usuários sobre destinos turísticos, gastronomia e cultura.
